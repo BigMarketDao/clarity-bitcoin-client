@@ -15,7 +15,10 @@ npm install clarity-bitcoin-client
 ### **1️⃣ Import the Library**
 
 ```typescript
-import { generateProof, verifyTxMined } from "clarity-bitcoin-client";
+import { fetchApiData, extractProofInfo, parseWTx, type TxForClarityBitcoin } from "clarity-bitcoin-client";
+const tx: TxForClarityBitcoin = await fetchApiData(network, mempoolApi, txId);
+const proof: SegwitData = await extractProofInfo(tx, contractId);
+const result = await parseWTx(stacksApi, proof);
 ```
 
 ### **2️⃣ Generate a Proof for a Bitcoin Transaction**
