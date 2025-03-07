@@ -21,19 +21,6 @@ const proof: SegwitData = await extractProofInfo(tx, contractId);
 const result = await parseWTx(stacksApi, proof);
 ```
 
-### **2️⃣ Generate a Proof for a Bitcoin Transaction**
-
-```typescript
-const result = await verifyMerkleCoinbaseProof({});
-```
-
-### **3️⃣ Verify the Transaction Proof in Clarity**
-
-```typescript
-const isMined = await wasTxMinedCompact(proof);
-console.log("Transaction Verified:", txid);
-```
-
 ## Test client
 
 A svelte app using this lib is [available here](https://bigmarket.ai/tools/proofs).
