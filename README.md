@@ -1,6 +1,8 @@
 # Clarity Bitcoin Client
 
-Clarity Bitcoin Client is an open-source TypeScript library for interacting with the **Clarity-Bitcoin contract** on the Stacks blockchain. It provides utilities for constructing, verifying, and submitting Bitcoin transaction proofs to Clarity smart contracts.
+Clarity Bitcoin Client is an open-source TypeScript library for interacting with the **[Clarity-Bitcoin-V5](https://explorer.hiro.so/txid/SP2PABAF9FTAJYNFZH93XENAJ8FVY99RRM50D2JG9.clarity-bitcoin-lib-v5?chain=mainnet) contract** on the Stacks blockchain.
+
+Given a bitcoin txid the library fetches the block and transaction data necessary to build the merkle proofs to submit to the clarity-bitcoin-lib-v5 contract.
 
 ## Features
 
