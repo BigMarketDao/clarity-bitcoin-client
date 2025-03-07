@@ -23,7 +23,7 @@ const result = await parseWTx(stacksApi, proof);
 
 ## Test client
 
-A svelte app using this lib is [available here](https://bigmarket.ai/tools/proofs).
+A svelte app using this lib is [available here](https://bigmarket.ai/tools/proofs?chain=mainnet).
 
 ## Known Issues
 
