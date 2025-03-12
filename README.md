@@ -12,14 +12,27 @@ npm install clarity-bitcoin-client
 
 ## Usage
 
-### **1️⃣ Import the Library**
+### 1. Library
 
 ```typescript
 import { fetchApiData, extractProofInfo, parseWTx, type TxForClarityBitcoin } from "clarity-bitcoin-client";
-const tx: TxForClarityBitcoin = await fetchApiData(network, mempoolApi, txId);
-const proof: TransactionProofSet = await extractProofInfo(tx, contractId);
-const result = await parseWTx(stacksApi, proof);
+const data: ProofRequest = await getProofData(req.params.txid, blockHash, getRpcParams());
+const pgd: ProofGenerationData = getProofGenerationData(data);
+const proof: TransactionProofSet = extractProofInfo(pgd, data);
 ```
+
+The bitcoin connection parameters are expected;
+
+```
+rpcHost: CONFIG.rpcHost,
+rpcPort: CONFIG.rpcPort,
+rpcPass: CONFIG.rpcPass,
+rpcUser: CONFIG.rpcUser
+```
+
+## 2. API Usage
+
+A hosted service is avaliable [here](https://api.bigmarket.ai/bigmarket-api/clarity-bitcoin/tx/766afff2bee37fcd797f4264480e575115e96d290adea9f14c82b5b3b7da8ed3/proof)
 
 ## Test client
 
@@ -27,21 +40,14 @@ A svelte app using this lib is [available here](https://bigmarket.ai/tools/proof
 
 ## Known Issues
 
-1. The `was-segwit-tx-mined-compact` method fails with error 7 - on verifying coinbase
-   merkle proof.
-2. Breaks if you give it the coinbase transaction id
-
-## API Reference
-
-Works with mempool space api. future editions may work with the rpc bitcoin node
-interface.
+1. the bitcoin node is pruned to 500 blocks roughly 3 days of transactions.
 
 ## Development
 
 Clone the repository and install dependencies:
 
 ```sh
-git clone https://github.com/your-repo/clarity-bitcoin-client.git
+git clone https://github.com/BigMarketDao/clarity-bitcoin-client.git
 cd clarity-bitcoin-client
 npm install
 ```
