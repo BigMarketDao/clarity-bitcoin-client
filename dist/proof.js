@@ -1,36 +1,129 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.ensureEven = ensureEven;
-exports.coinbaseWitness = coinbaseWitness;
-exports.ensure32Bytes = ensure32Bytes;
-exports.extractProofInfo = extractProofInfo;
-const base_1 = require("@scure/base");
-const common_1 = require("@stacks/common");
-const sha256_1 = require("@noble/hashes/sha256");
-const LEFT = "left";
-const RIGHT = "right";
-function headerHex(block) {
-    const headerHex = base_1.hex.encode(base_1.hex.decode(block.version.toString(16).padStart(8, "0")).reverse()) +
-        base_1.hex.encode(base_1.hex.decode(block.previousblockhash).reverse()) +
-        base_1.hex.encode(base_1.hex.decode(block.merkle_root).reverse()) +
-        base_1.hex.encode(base_1.hex.decode(block.timestamp.toString(16).padStart(8, "0")).reverse()) +
-        base_1.hex.encode(base_1.hex.decode(block.bits.toString(16).padStart(8, "0")).reverse()) +
-        base_1.hex.encode(base_1.hex.decode(block.nonce.toString(16).padStart(8, "0")).reverse());
-    return headerHex;
+import { hex } from "@scure/base";
+import { concatBytes } from "@stacks/common";
+import { sha256 } from "@noble/hashes/sha256";
+import { reverseAndEven } from "./bitcoin";
+export function extractProofInfo(pgd, data) {
+    let transactionProofSet = {};
+    try {
+        const targetTx = pgd.block.txids.find((o) => o.txid === pgd.txId);
+        if (!targetTx)
+            throw new Error("Target transaction not found in block");
+        const txIndex = pgd.block.txids.findIndex((t) => t.txid === pgd.txId);
+        if (txIndex === -1)
+            throw new Error("Transaction not found in block!");
+        const txids = pgd.block.txids.map((o) => o.txid);
+        const wtxids = pgd.block.txids.map((o) => o.wtxid);
+        const segwit = pgd.block.txids[txIndex].segwit;
+        const reversedTxIds = reverseAndEven(txids);
+        const reversedWTxIds = reverseAndEven(wtxids);
+        const wtxid = wtxids[txIndex];
+        const wtxidR = reversedWTxIds[txIndex];
+        // ✅ Ensure we have valid inputs before calling `generateMerkleProof`
+        if (!reversedTxIds[txIndex] || (segwit && !reversedWTxIds[txIndex])) {
+            throw new Error("Transaction not found in the merkle tree");
+        }
+        const merkleRoot = generateMerkleRoot(reversedTxIds);
+        const merkleHeaderRootLE = hex.encode(hex.decode(pgd.block.merkle_root).reverse());
+        if (merkleHeaderRootLE !== merkleRoot) {
+            throw new Error("extractProofInfo: merkleRoot mismatch");
+        }
+        for (let i = 0; i < 10; i++) {
+            console.log(`📌 Index ${i}:`);
+            console.log(`🔹 My TXID: ${txids[i]}`);
+            console.log(`🔹 My TXID-R: ${reversedTxIds[i]}`);
+            console.log(`🔸 My WTXID: ${wtxids[i]}`);
+            console.log(`🔸 My WTXID-R: ${reversedWTxIds[i]}`);
+            // // const kennyWTXID = hex.encode(calculateWTXID(data.block.tx[i].hex));
+            // console.log(`💎 Kenny's Proof TXID: ${kennyWTXID}`);
+            console.log("------------------------------------------------------");
+        }
+        // ✅ Generate Transaction Proof (wproof)
+        console.log("============================================================================");
+        let treeDepth = 0;
+        let computedWtxidRoot;
+        let wproof;
+        if (segwit) {
+            const wtree = generateMerkleProof(reversedWTxIds[txIndex], reversedWTxIds);
+            treeDepth = wtree.treeDepth;
+            wproof = wtree.merkleProof;
+            computedWtxidRoot = generateMerkleRoot(reversedWTxIds);
+            const commitmentHash = calculateWitnessCommitment(computedWtxidRoot, pgd.witnessReservedValue);
+            pgd.witnessReservedValue = hex.encode(new Uint8Array(32)); // 32 bytes of 0x00
+            console.log("extractProofInfo: Client transaction                         :" + data.txid);
+            console.log("extractProofInfo: Witness Merkle Root                        :" + computedWtxidRoot);
+            console.log("extractProofInfo: Witness Merkle witnessReservedValue        :" + pgd.witnessReservedValue);
+            console.log("extractProofInfo: Witness Merkle commitmentHash              :" + commitmentHash);
+            console.log("extractProofInfo: Witness Merkle Root witnessMerkleRoot      :" + pgd.witnessMerkleRoot);
+            if (verifyWitnessCommitment(computedWtxidRoot, pgd.witnessReservedValue, pgd.witnessMerkleRoot)) {
+                console.log("✅ Witness Commitment Matches!");
+            }
+            else {
+                console.log("❌ Mismatch in Witness Commitment!");
+            }
+        }
+        else {
+            const wtree = generateMerkleProof(reversedTxIds[txIndex], reversedTxIds);
+            treeDepth = wtree.treeDepth;
+            wproof = wtree.merkleProof;
+            const isValid = verifyMerkleProofHex(reversedTxIds[txIndex], wproof, pgd.block.merkle_root, txIndex);
+            console.log("✅ Legacy proof:", isValid);
+        }
+        const coinbaseProof = generateMerkleProof(reversedTxIds[0], reversedTxIds);
+        const cproof = coinbaseProof.merkleProof;
+        let isValid = verifyMerkleProofHex(txids[0], cproof, pgd.block.merkle_root, 0);
+        console.log("✅ verifyMerkleProofHex:", isValid);
+        console.log("============================================================================");
+        // ✅ Compute and Verify Merkle Root
+        const merkleRootLE = hex.encode(hex.decode(pgd.block.merkle_root).reverse());
+        if (merkleRootLE !== merkleRoot)
+            throw new Error("extractProofInfo: merkleRoot mismatch");
+        transactionProofSet = {
+            txId: pgd.txId,
+            txId0Reversed: reversedTxIds[0],
+            txIdReversed: reversedTxIds[txIndex],
+            wtxidR: wtxidR,
+            wtxid: wtxid,
+            height: Number(pgd.block.height),
+            txHex: pgd.txhex,
+            header: pgd.block.header,
+            txIndex,
+            treeDepth,
+            wproof,
+            merkleRoot,
+            computedWtxidRoot,
+            witnessReservedValue: segwit ? pgd.witnessReservedValue : undefined,
+            witnessMerkleRoot: segwit ? pgd.witnessMerkleRoot : undefined,
+            ctxHex: pgd.ctxhex,
+            cproof,
+            segwit,
+        };
+    }
+    catch (error) {
+        console.error("Error generating proof data:", error);
+    }
+    return transactionProofSet;
 }
-// export const doubleSha = (valueToBeHashed: string): Uint8Array => {
-// 	return sha256(sha256(hex.decode(valueToBeHashed))) as Uint8Array;
-// };
-// export const hashPairReverse = (a: string, b: string): string => {
-// 	const bytes = concatBytes(hex.decode(a).reverse(), hex.decode(b).reverse());
-// 	const hashedBytes = sha256(sha256(bytes));
-// 	const pair = hex.encode(hashedBytes.reverse());
-// 	return pair;
-// };
+function calculateWitnessCommitment(witnessMerkleRoot, witnessReservedValue) {
+    const rootBytes = hex.decode(witnessMerkleRoot);
+    const reservedBytes = hex.decode(witnessReservedValue);
+    const combined = new Uint8Array([...rootBytes, ...reservedBytes]);
+    const commitmentHash = sha256(sha256(combined));
+    return hex.encode(commitmentHash);
+}
+// function headerHex(block: any) {
+//   const headerHex =
+//     hex.encode(hex.decode(block.version.toString(16).padStart(8, "0")).reverse()) +
+//     hex.encode(hex.decode(block.previousblockhash).reverse()) +
+//     hex.encode(hex.decode(block.merkle_root).reverse()) +
+//     hex.encode(hex.decode(block.timestamp.toString(16).padStart(8, "0")).reverse()) +
+//     hex.encode(hex.decode(block.bits.toString(16).padStart(8, "0")).reverse()) +
+//     hex.encode(hex.decode(block.nonce.toString(16).padStart(8, "0")).reverse());
+//   return headerHex;
+// }
 const hashPair = (a, b) => {
-    const bytes = (0, common_1.concatBytes)(base_1.hex.decode(a), base_1.hex.decode(b));
-    const hashedBytes = (0, sha256_1.sha256)((0, sha256_1.sha256)(bytes));
-    const pair = base_1.hex.encode(hashedBytes);
+    const bytes = concatBytes(hex.decode(a), hex.decode(b));
+    const hashedBytes = sha256(sha256(bytes));
+    const pair = hex.encode(hashedBytes);
     return pair;
 };
 /**
@@ -38,7 +131,7 @@ const hashPair = (a, b) => {
  * end of the array, so it can be hashed with itself.
  * @param {Array<string>} hashes
  */
-function ensureEven(hashes) {
+export function ensureEven(hashes) {
     if (hashes.length % 2 !== 0) {
         hashes.push(hashes[hashes.length - 1]);
     }
@@ -52,10 +145,10 @@ function ensureEven(hashes) {
  * @param {Array<Array<string>>} merkleTree
  * @returns {string} direction
  */
-function getLeafNodeDirectionInMerkleTree(hash, merkleTree) {
-    const hashIndex = merkleTree[0].findIndex((h) => h === hash);
-    return hashIndex % 2 === 0 ? LEFT : RIGHT;
-}
+// function getLeafNodeDirectionInMerkleTree(hash: string, merkleTree: Array<Array<string>>) {
+//   const hashIndex = merkleTree[0].findIndex((h: string) => h === hash);
+//   return hashIndex % 2 === 0 ? LEFT : RIGHT;
+// }
 /**
  * Generates the Merkle root of the hashes passed through the parameter.
  * Recursively concatenates pair of hashes and calculates each sha256 hash of the
@@ -76,6 +169,7 @@ function generateMerkleRoot(hashes) {
     // If the combinedHashes length is 1, it means that we have the merkle root already
     // and we can return
     if (combinedHashes.length === 1) {
+        console.log("generateMerkleRoot: ", combinedHashes);
         return combinedHashes.join("");
     }
     return generateMerkleRoot(combinedHashes);
@@ -93,7 +187,7 @@ function generateMerkleRoot(hashes) {
  * @param {Array<string>} hashes
  * @returns {Array<Array<string>>} merkleTree
  */
-function generateMerkleTree(hashes) {
+export function generateMerkleTree(hashes) {
     if (!hashes || hashes.length === 0) {
         return [];
     }
@@ -146,104 +240,65 @@ function generateMerkleTree(hashes) {
  * @param {Array<string>} hashes
  * @returns {Array<node>} merkleProof
  */
-function generateMerkleProof(hash, hashes) {
-    if (!hash || !hashes || hashes.length === 0) {
-        return null;
-    }
+export function generateMerkleProof(hash, hashes) {
     const tree = generateMerkleTree(hashes);
-    const merkleProof = [
-        {
-            hash,
-            direction: getLeafNodeDirectionInMerkleTree(hash, tree),
-        },
-    ];
+    const treeDepth = tree.length - 1; // Should match proof length
+    const merkleProof = [];
     let hashIndex = tree[0].findIndex((h) => h === hash);
-    for (let level = 0; level < tree.length - 1; level++) {
+    for (let level = 0; level < treeDepth; level++) {
+        // Stop at treeDepth
         const isLeftChild = hashIndex % 2 === 0;
-        const siblingDirection = isLeftChild ? RIGHT : LEFT;
         const siblingIndex = isLeftChild ? hashIndex + 1 : hashIndex - 1;
-        const siblingNode = {
-            hash: tree[level][siblingIndex],
-            direction: siblingDirection,
-        };
-        merkleProof.push(siblingNode);
+        // Ensure the sibling exists before adding it to the proof
+        if (siblingIndex < tree[level].length) {
+            merkleProof.push(tree[level][siblingIndex]);
+        }
         hashIndex = Math.floor(hashIndex / 2);
     }
-    return merkleProof;
+    if (merkleProof.length !== treeDepth) {
+        throw new Error(`Proof length mismatch: expected ${treeDepth}, got ${merkleProof.length}`);
+    }
+    return { merkleProof, treeDepth };
 }
-function coinbaseWitness(parsedCTx) {
-    let witnessReservedValue = "00000000000000000000000000000000";
-    let witnessMerkleRoot = "00000000000000000000000000000000";
-    for (let i = 0; i < parsedCTx.outputsLength; i++) {
-        const output = parsedCTx.getOutput(i);
-        if (output.script && output.script[0] === 0x6a) {
-            // OP_RETURN check
-            if (base_1.hex.encode(output.script).startsWith("6a24aa21a9ed")) {
-                // OP_RETURN + Witness Commitment Tag
-                witnessMerkleRoot = base_1.hex.encode(output.script.slice(10, 74)); // Extract witness-merkle-root (32 bytes after tag)
-            }
-            const extractedData = base_1.hex.encode(output.script.slice(1)); // OP_RETURN data
-            witnessReservedValue = ensure32Bytes(extractedData);
-            break; // Stop after finding the first OP_RETURN
-        }
-    }
-    return { witnessReservedValue, witnessMerkleRoot };
+function verifyWitnessCommitment(witnessMerkleRoot, witnessReservedValue, expectedCommitment) {
+    // Decode hex values
+    const rootBytes = hex.decode(witnessMerkleRoot);
+    const reservedBytes = hex.decode(witnessReservedValue);
+    // Concatenate and compute double SHA256
+    const commitmentHash = sha256(sha256(new Uint8Array([...rootBytes, ...reservedBytes])));
+    // Compare with extracted witness commitment
+    return hex.encode(commitmentHash) === expectedCommitment;
 }
-function ensure32Bytes(hexStr) {
-    const clean = hexStr.startsWith("0x") ? hexStr.slice(2) : hexStr;
-    if (clean.length < 64) {
-        return clean.padEnd(64, "0"); // Pad if too short
+// function convertToMerkleProofSteps(hashes: string[]): MerkleProofStep[] {
+// 	return hashes.map((hash, index) => ({
+// 		position: index % 2 === 0 ? 'left' : 'right',
+// 		data: Buffer.from(hex.decode(hash))
+// 	}));
+// }
+/**
+ * Verifies a Merkle proof using hex-encoded inputs.
+ * @param txHashHex - The hex-encoded transaction hash (little-endian).
+ * @param proofHexArray - An array of hex-encoded proof hashes.
+ * @param merkleRootHex - The hex-encoded expected Merkle root (little-endian).
+ * @param txIndex - The index of the transaction in the Merkle tree.
+ * @returns {boolean} - True if proof is valid, false otherwise.
+ */
+function verifyMerkleProofHex(txHashHex, proofHexArray, merkleRootHex, txIndex) {
+    // Convert hex to buffers
+    let currentHash = Buffer.from(hex.decode(txHashHex)); // .reverse(); // Reverse for internal byte order
+    const merkleRoot = Buffer.from(hex.decode(merkleRootHex)); //.reverse(); // Reverse root for Bitcoin order
+    // Process proof hashes
+    for (let i = 0; i < proofHexArray.length; i++) {
+        const proofHash = Buffer.from(hex.decode(proofHexArray[i])); // .reverse(); // Reverse proof elements
+        const isRightNode = (txIndex >> i) & 1;
+        // Concatenate in the correct order
+        const combined = isRightNode
+            ? Buffer.concat([proofHash, currentHash]) // txHash is left, proofHash is right
+            : Buffer.concat([currentHash, proofHash]); // txHash is right, proofHash is left
+        // Hash the combined buffer
+        currentHash = Buffer.from(sha256(sha256(combined)));
     }
-    return clean.slice(0, 64); // Trim if too long
-}
-function extractProofInfo(tx, clarityBitcoinContract) {
-    let segwitData = {};
-    try {
-        const txs = tx.block.txs;
-        const reversedTxIds = tx.block.reversedTxIds;
-        const txIndex = txs.findIndex((t) => t === tx.txId);
-        if (txIndex === -1)
-            throw new Error("Transaction not found in block!");
-        const wproof = generateMerkleProof(reversedTxIds[txIndex], reversedTxIds)?.map((o) => o.hash) || [];
-        wproof.splice(0, 1);
-        const cproof = generateMerkleProof(reversedTxIds[0], reversedTxIds)?.map((o) => o.hash) || [];
-        cproof.splice(0, 1);
-        const merkleRoot = generateMerkleRoot(reversedTxIds);
-        const merkleRootLE = base_1.hex.encode(base_1.hex.decode(tx.block.merkle_root).reverse());
-        if (merkleRootLE !== merkleRoot)
-            throw new Error("extractProofInfo: merkleRoot: " + merkleRootLE);
-        const maxDepth = Math.max(wproof.length, cproof.length);
-        // Pad both proofs if needed
-        // while (wproof.length < maxDepth) {
-        // 	//wproof.push('0000000000000000000000000000000000000000000000000000000000000000'); // 32-byte zero hash
-        // }
-        // while (cproof.length < maxDepth) {
-        // 	//cproof.push('0000000000000000000000000000000000000000000000000000000000000000'); // 32-byte zero hash
-        // }
-        segwitData = {
-            contract: clarityBitcoinContract,
-            txId: tx.txId,
-            txId0Reversed: tx.block.reversedTxIds[0],
-            txIdReversed: tx.block.reversedTxIds[txIndex],
-            height: Number(tx.block.height),
-            txHex: tx.hex,
-            wtxHex: tx.whex,
-            header: tx.block.header,
-            txIndex: txIndex,
-            treeDepth: maxDepth,
-            wproof: wproof,
-            merkleRoot: merkleRoot,
-            witnessReservedValue: tx.witnessReservedValue,
-            witnessMerkleRoot: tx.witnessMerkleRoot,
-            wctxHex: tx.cwhex,
-            ctxHex: tx.chex,
-            cproof: cproof,
-        };
-        console.log("Test data generated successfully:", segwitData);
-    }
-    catch (error) {
-        console.error("Error generating test data:", error);
-    }
-    return segwitData;
+    // Compare the final computed root with the expected Merkle root
+    return currentHash.equals(merkleRoot);
 }
 //# sourceMappingURL=proof.js.map

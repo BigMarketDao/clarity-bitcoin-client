@@ -1,10 +1,36 @@
 import * as btc from "@scure/btc-signer";
-import type { TxOpts } from "@scure/btc-signer/transaction";
-import { coinbaseWitness, ensureEven } from "./proof";
+import type { ProofRequest, ProofGenerationData, RpcTransaction } from "./proof-types";
 import { hex } from "@scure/base";
-import type { TxForClarityBitcoin } from "./proof-types";
+import { ensureEven } from "./proof";
+import { bitcoinRPC } from "./rpc";
 
-function reverseAndEven(txs: Array<string>) {
+export async function getProofDataRecent(index: number, rpcParams: any): Promise<ProofRequest> {
+  const info = await bitcoinRPC("getblockchaininfo", [], rpcParams);
+  const block = await bitcoinRPC("getblock", [info.bestblockhash, 2], rpcParams);
+  const tx: RpcTransaction = block.tx[index];
+  const blockHex = await bitcoinRPC("getblock", [info.bestblockhash, 0], rpcParams);
+  const data: ProofRequest = {
+    txid: tx.txid,
+    block,
+    blockHeader: blockHex.slice(0, 160),
+  };
+  return data;
+}
+
+export async function getProofData(txid: string, blockhash: string, rpcParams: any): Promise<ProofRequest> {
+  console.log(txid, blockhash);
+  const block = await bitcoinRPC("getblock", [blockhash, 2], rpcParams);
+
+  const blockHex = await bitcoinRPC("getblock", [blockhash, 0], rpcParams);
+  const data: ProofRequest = {
+    txid,
+    block,
+    blockHeader: blockHex.slice(0, 160),
+  };
+  return data;
+}
+
+export function reverseAndEven(txs: Array<string>) {
   const txIds = txs.map(function (tx: any) {
     return hex.encode(hex.decode(tx).reverse());
   });
@@ -12,124 +38,72 @@ function reverseAndEven(txs: Array<string>) {
   return txIds;
 }
 
-export async function fetchApiData(network: string, mempoolApi: string, txId: string): Promise<TxForClarityBitcoin> {
-  const mempoolTx = (await fetchTransaction(mempoolApi, txId)) as any;
-  if (!mempoolTx) {
-    throw new Error("No transaction found on network " + network + " for txid: " + txId);
-  }
-  const blockHash = mempoolTx.status ? mempoolTx.status.block_hash : mempoolTx.blockhash;
-  const block1 = await fetchBlockByHash(mempoolApi, blockHash);
-  const header = await fetch80ByteBlockHeader(mempoolApi, blockHash);
-  if (!header) {
-    throw new Error("No header found on network " + network + " for block-hash: " + blockHash);
-  }
-  const txs = await fetchBlockByHashWithTransactionIds(mempoolApi, blockHash);
-  const reversedTxIds = reverseAndEven(txs);
+export function getProofGenerationData(data: ProofRequest): ProofGenerationData {
+  console.log("getProofGenerationData: txid: " + data.txid);
+  const header = data.blockHeader;
+  const iddata = getTxDataEfficiently(data);
 
-  const txHex = await fetchTransactionHex(mempoolApi, txId);
-  if (!txHex) {
-    throw new Error("No transaction found on network " + network + " for txid: " + txId);
-  }
-  const parsedTx = btc.Transaction.fromRaw(hex.decode(txHex), { allowUnknownInputs: true, allowUnknownOutputs: true });
+  const txIndex = data.block.tx.findIndex((o) => o.txid === data.txid);
+  console.log("getProofGenerationData: data.tx: " + data.block.tx.length);
+  console.log("getProofGenerationData: txids: " + iddata.txids.length);
+  console.log("getProofGenerationData: numb txs segwit   :" + iddata.segCounter);
+  // const parsedTx = btc.Transaction.fromRaw(hex.decode(data.block.tx[txIndex].hex), { allowUnknownInputs: true, allowUnknownOutputs: true });
+  const parsedCTx = btc.Transaction.fromRaw(hex.decode(data.block.tx[0].hex), { allowUnknownInputs: true, allowUnknownOutputs: true, disableScriptCheck: true });
+  const { witnessReservedValue, witnessMerkleRoot } = getCommitmentHashFromRawCtx(data.block.tx[0].hex);
 
-  const ctxHex = await fetchTransactionHex(mempoolApi, txs[0]); // Coinbase tx is always first
-  if (!ctxHex) {
-    throw new Error("No coinbase transaction found on network " + network + " for txid: " + txs[0]);
-  }
-  const o: TxOpts = {} as TxOpts;
-  const parsedCTx = btc.Transaction.fromRaw(hex.decode(ctxHex), { allowUnknownInputs: true, allowUnknownOutputs: true });
-  const { witnessReservedValue, witnessMerkleRoot } = coinbaseWitness(parsedCTx);
+  console.log("getProofGenerationData: witnessReservedValue: " + witnessReservedValue);
+  console.log("getProofGenerationData: witnessMerkleRoot: " + witnessMerkleRoot);
+
+  const txhex = data.block.tx[txIndex].hex;
   return {
-    txId: txId,
-    hex: hex.encode(parsedTx.toBytes(false, false)),
-    whex: hex.encode(parsedTx.toBytes(true, true)),
-    chex: hex.encode(parsedCTx.toBytes(false, false)),
-    cwhex: hex.encode(parsedCTx.toBytes(true, true)),
+    txId: data.txid,
+    txhex: txhex,
+    ctxhex: hex.encode(parsedCTx.toBytes(true, false)), //ctxhex, // fix for coinbase was-tx-mined
+    // hex: hex.encode(parsedTx.toBytes(true, false)),
+    // whex: hex.encode(parsedTx.toBytes(true, true)),
+    // chex: hex.encode(parsedCTx.toBytes(true, false)),
+    // cwhex: hex.encode(parsedCTx.toBytes(true, true)),
     witnessReservedValue,
     witnessMerkleRoot,
 
     block: {
-      id: block1.id,
-      txs,
+      id: data.block.hash,
+      txids: iddata.txids,
       header,
-      reversedTxIds,
-      merkle_root: block1.merkle_root,
-      height: block1.height,
+      merkle_root: data.block.merkleroot,
+      height: data.block.height,
     },
   };
 }
 
-export async function fetchBlockByHashWithTransactionsFull(mempoolUrl: string, hash: string) {
-  try {
-    let url = `${mempoolUrl}/block/${hash}/txs`;
-    let response = await fetch(url);
-    const block = await response.json();
-    return block;
-  } catch (error) {
-    console.error("Error fetching block timestamp:", error);
-  }
+function getTxDataEfficiently(data: ProofRequest): { segCounter: number; txids: Array<{ txid: string; wtxid: string; segwit: boolean }> } {
+  let segCounter = 0;
+  const txids = data.block.tx.map((tx, i) => {
+    // parsedCTx = btc.Transaction.fromRaw(hex.decode(data.block.tx[0].hex), { allowUnknownInputs: true, allowUnknownOutputs: true, disableScriptCheck: true });
+    if (i === 0) {
+      // Always set coinbase WTXID to 000...000
+      //hex.encode(parsedCTx.toBytes(true, false))
+      const zerohash = hex.encode(new Uint8Array(32));
+      console.log("tx.hash: " + tx.hash);
+      console.log("tx.txid: " + tx.txid);
+      console.log("tx.zerohash: " + zerohash); // no agreement
+      return {
+        txid: tx.txid,
+        wtxid: zerohash, //'0000000000000000000000000000000000000000000000000000000000000000',
+        segwit: false,
+      };
+    }
+    return {
+      txid: tx.txid, // TXID always stays big-endian
+      wtxid: tx.hash, //tx.txid === tx.hash ? tx.hash : hex.encode(hex.decode(tx.hash)), // Reverse WTXID only for SegWit TXs
+      segwit: tx.txid !== tx.hash,
+    };
+  });
+
+  return { txids, segCounter };
 }
 
-async function fetchBlockByHashWithTransactionIds(mempoolUrl: string, hash: string) {
-  try {
-    let url = `${mempoolUrl}/block/${hash}/txids`;
-    let response = await fetch(url);
-    const block = await response.json();
-    return block;
-  } catch (error) {
-    console.error("Error fetching block timestamp:", error);
-  }
-}
-
-async function fetch80ByteBlockHeader(mempoolUrl: string, hash: string): Promise<string | undefined> {
-  try {
-    const url = `${mempoolUrl}/block/${hash}/raw`;
-    // raw binary block data
-    const response = await fetch(url);
-    const rawData = new Uint8Array(await response.arrayBuffer()); // Correctly handle binary data
-    // Extract the first 80 bytes (block header)
-    const blockHeader = rawData.slice(0, 80);
-    return hex.encode(blockHeader);
-  } catch (error) {
-    console.error("Error: fetch80ByteBlockHeader:", error);
-  }
-  return;
-}
-
-async function fetchTransactionHex(mempoolUrl: string, txid: string) {
-  try {
-    //https://api.blockcypher.com/v1/btc/test3/txs/<txID here>?includeHex=true
-    //https://mempool.space/api/tx/15e10745f15593a899cef391191bdd3d7c12412cc4696b7bcb669d0feadc8521/hex
-    const url = mempoolUrl + "/tx/" + txid + "/hex";
-    const response = await fetch(url);
-    const hex = await response.text();
-    return hex;
-  } catch (err) {
-    console.log(err);
-    return;
-  }
-}
-
-async function fetchTransaction(mempoolUrl: string, txid: string) {
-  try {
-    const url = mempoolUrl + "/tx/" + txid;
-    const response = await fetch(url);
-    if (response.status !== 200) throw new Error("fetchTransaction: Unable to fetch transaction for: " + txid);
-    const tx = await response.json();
-    return tx;
-  } catch (err) {
-    console.log(err);
-    return;
-  }
-}
-
-async function fetchBlockByHash(mempoolUrl: string, hash: string) {
-  try {
-    let url = `${mempoolUrl}/block/${hash}`;
-    let response = await fetch(url);
-    const block = await response.json();
-    return block;
-  } catch (error) {
-    console.error("Error fetching block timestamp:", error);
-  }
+function getCommitmentHashFromRawCtx(ctx: string) {
+  const chash = ctx.substring(ctx.indexOf("6a24aa21a9ed") + 12, ctx.indexOf("6a24aa21a9ed") + 12 + 64);
+  return { witnessMerkleRoot: chash, witnessReservedValue: "0000000000000000000000000000000000000000000000000000000000000000" };
 }
