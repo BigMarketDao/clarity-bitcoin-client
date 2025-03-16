@@ -24,10 +24,12 @@ const proof: TransactionProofSet = extractProofInfo(pgd, data);
 The bitcoin connection parameters are expected;
 
 ```
-rpcHost: CONFIG.rpcHost,
-rpcPort: CONFIG.rpcPort,
-rpcPass: CONFIG.rpcPass,
-rpcUser: CONFIG.rpcUser
+{
+   rpcHost: CONFIG.rpcHost,
+   rpcPort: CONFIG.rpcPort,
+   rpcPass: CONFIG.rpcPass,
+   rpcUser: CONFIG.rpcUser
+}
 ```
 
 ## 2. API Usage
