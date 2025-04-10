@@ -67,14 +67,11 @@ export function extractProofInfo(pgd: ProofGenerationData, data: ProofRequest): 
       const wtree = generateMerkleProof(reversedTxIds[txIndex], reversedTxIds);
       treeDepth = wtree.treeDepth;
       wproof = wtree.merkleProof;
-      const isValid = verifyMerkleProofHex(reversedTxIds[txIndex], wproof, pgd.block.merkle_root, txIndex);
-      console.log("✅ Legacy proof:", isValid);
+      // const isValid = verifyMerkleProofHex(reversedTxIds[txIndex], wproof, pgd.block.merkle_root, txIndex);
+      // console.log("✅ Legacy proof:", isValid);
     }
     const coinbaseProof = generateMerkleProof(reversedTxIds[0], reversedTxIds);
     const cproof = coinbaseProof.merkleProof;
-
-    let isValid = verifyMerkleProofHex(txids[0], cproof, pgd.block.merkle_root, 0);
-    console.log("✅ verifyMerkleProofHex:", isValid);
 
     console.log("============================================================================");
     // ✅ Compute and Verify Merkle Root
@@ -303,7 +300,7 @@ function verifyWitnessCommitment(witnessMerkleRoot: string, witnessReservedValue
  * @param txIndex - The index of the transaction in the Merkle tree.
  * @returns {boolean} - True if proof is valid, false otherwise.
  */
-function verifyMerkleProofHex(txHashHex: string, proofHexArray: string[], merkleRootHex: string, txIndex: number): boolean {
+export function verifyMerkleProofHex(txHashHex: string, proofHexArray: string[], merkleRootHex: string, txIndex: number): boolean {
   // Convert hex to buffers
   let currentHash = Buffer.from(hex.decode(txHashHex)); // .reverse(); // Reverse for internal byte order
   const merkleRoot = Buffer.from(hex.decode(merkleRootHex)); //.reverse(); // Reverse root for Bitcoin order

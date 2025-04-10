@@ -46,4 +46,13 @@ export declare function generateMerkleProof(hash: string, hashes: Array<string>)
     merkleProof: string[];
     treeDepth: number;
 };
+/**
+ * Verifies a Merkle proof using hex-encoded inputs.
+ * @param txHashHex - The hex-encoded transaction hash (little-endian).
+ * @param proofHexArray - An array of hex-encoded proof hashes.
+ * @param merkleRootHex - The hex-encoded expected Merkle root (little-endian).
+ * @param txIndex - The index of the transaction in the Merkle tree.
+ * @returns {boolean} - True if proof is valid, false otherwise.
+ */
+export declare function verifyMerkleProofHex(txHashHex: string, proofHexArray: string[], merkleRootHex: string, txIndex: number): boolean;
 //# sourceMappingURL=proof.d.ts.map
