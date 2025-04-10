@@ -1,7 +1,7 @@
 import { hex } from "@scure/base";
 import { concatBytes } from "@stacks/common";
 import { sha256 } from "@noble/hashes/sha256";
-import { reverseAndEven } from "./bitcoin";
+import { reverseAndEven } from "./bitcoin.js";
 export function extractProofInfo(pgd, data) {
     let transactionProofSet = {};
     try {

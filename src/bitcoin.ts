@@ -1,8 +1,8 @@
 import * as btc from "@scure/btc-signer";
-import type { ProofRequest, ProofGenerationData, RpcTransaction } from "./proof-types";
+import type { ProofRequest, ProofGenerationData, RpcTransaction } from "./proof-types.js";
 import { hex } from "@scure/base";
-import { ensureEven } from "./proof";
-import { bitcoinRPC } from "./rpc";
+import { ensureEven } from "./proof.js";
+import { bitcoinRPC } from "./rpc.js";
 
 export async function getProofDataRecent(index: number, rpcParams: any): Promise<ProofRequest> {
   const info = await bitcoinRPC("getblockchaininfo", [], rpcParams);

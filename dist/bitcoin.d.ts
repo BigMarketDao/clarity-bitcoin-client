@@ -1,4 +1,4 @@
-import type { ProofRequest, ProofGenerationData } from "./proof-types";
+import type { ProofRequest, ProofGenerationData } from "./proof-types.js";
 export declare function getProofDataRecent(index: number, rpcParams: any): Promise<ProofRequest>;
 export declare function getProofData(txid: string, blockhash: string, rpcParams: any): Promise<ProofRequest>;
 export declare function reverseAndEven(txs: Array<string>): string[];

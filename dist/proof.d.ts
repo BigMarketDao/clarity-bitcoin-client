@@ -1,4 +1,4 @@
-import { ProofGenerationData, ProofRequest, TransactionProofSet } from "./proof-types";
+import { ProofGenerationData, ProofRequest, TransactionProofSet } from "./proof-types.js";
 export declare function extractProofInfo(pgd: ProofGenerationData, data: ProofRequest): TransactionProofSet;
 /**
  * If the hashes length is not even, then it copies the last hash and adds it to the

@@ -1,5 +1,5 @@
-export * from "./bitcoin";
-export * from "./proof-types";
-export * from "./proof";
-export * from "./rpc";
+export * from "./bitcoin.js";
+export * from "./proof-types.js";
+export * from "./proof.js";
+export * from "./rpc.js";
 //# sourceMappingURL=index.js.map
